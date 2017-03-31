@@ -1,190 +1,68 @@
-# Cronjob to export GraphDB in Docker
+# Airflow Demo
 
-## Build
+Airflow is a workflow engine from Airbnb. Airbnb developed it for its internal use and had open sourced it. In Airflow, the workflow is defined programmatically. Airflow document says that it's more maintainable to build workflows, and Airflow also comes with a elegant web interface. 
 
-As you update or add groovy script to export graph DB, you have to rebuild and push docker image.
+The main concept of airflow is a DAG (Directed Acyclic Graph). A DAG contains vertices and directed edges. In a DAG, you can never reach to the same vertex, at which you have started, following the directed edges. Otherwise your workflow can get into an infinite loop. In workflow context, tasks can be defined as vertex and the sequence is represented with the directed edge. The sequence decides the order in which the tasks will be performed.
 
-```shell
-$> docker build -t soocii/pepper-cron .
-$> docker push soocii/pepper-cron
+Make no mistake about the fact that airflow is just a workflow engine. It is only responsible for defining tasks and sequences. The details of task has to be handled by each task on its own. Airflow provides hooks for initiating tasks and has integration points to other systems.
+
+Airflow is in Python and the workflows are also defined using Python. 
+
+## Install
+
+Airflow needs a home and we can give the home to any place.
+
+```
+# assume you checkout the repo and change to the folder
+export AIRFLOW_HOME=`pwd`
 ```
 
-## Usage
+### Install airflow
 
-```shell
-$> docker run --name pepper-cron soocii/pepper-cron \
-    [-g pepper.prod.backend.titan] \
-    [-b soocii-table] \
-    -d 20170323
-```
+`pip install airflow`
 
-* -g: specify graph table name, and `pepper.integ.backend.titan` by default.
-* -b: specify S3 bucket name, and `soocii-integration-table` by default.
-* -d: specify date to export in format `YYYMMDD`, 20170323, for example.
+### Initialize database
 
-## Register as cronjob in Ubuntu
+`airflow initdb`
 
-The entry of cronjob has been prepared, therefore you may simply add `pepper-cron.sh`.
+### Start the webserver
 
-## Hive Table Creation
+`airflow webserver -p 8080`
 
-### posted status
-```
-CREATE EXTERNAL TABLE `soocii_pepper_posted_status`(
-  `status_creator` string,
-  `status_id` string,
-  `status_create_at` bigint,
-  `status_create_at_precise` string,
-  `status_update_at_precise` string,
-  `status_comment_update_at_precise` string,
-  `status_type` string,
-  `status_visibility` string,
-  `tag_name` string)
-PARTITIONED BY (
-  `day` string)
-ROW FORMAT SERDE
-  'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe'
-WITH SERDEPROPERTIES (
-  'field.delim'='\t',
-  'line.delim'='\n',
-  'serialization.format'='\t')
-STORED AS INPUTFORMAT
-  'org.apache.hadoop.mapred.TextInputFormat'
-OUTPUTFORMAT
-  'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
-LOCATION
-  's3://soocii-table/soocii_pepper/posted_status_table.tsv/'
-TBLPROPERTIES (
-  'transient_lastDdlTime'='1490352775');
+### Start the scheduler
 
-MSCK REPAIR TABLE `soocii_pepper_posted_status`;
-```
+The Airflow scheduler monitors all tasks and all DAGs, and triggers the task instances whose dependencies have been met. Behind the scenes, it monitors and stays in sync with a folder for all DAG objects it may contain, and periodically (every minute or so) inspects active tasks to see whether they can be triggered.
 
-### commented status
-```
-CREATE EXTERNAL TABLE `soocii_pepper_commented_status`(
-  `comment_creator` string,
-  `comment_id` string,
-  `comment_create_at` bigint,
-  `comment_create_at_precise` string,
-  `comment_update_at_precise` string,
-  `status_creator` string,
-  `status_id` string)
-PARTITIONED BY (
-  `day` string)
-ROW FORMAT SERDE
-  'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe'
-WITH SERDEPROPERTIES (
-  'field.delim'='\t',
-  'line.delim'='\n',
-  'serialization.format'='\t')
-STORED AS INPUTFORMAT
-  'org.apache.hadoop.mapred.TextInputFormat'
-OUTPUTFORMAT
-  'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
-LOCATION
-  's3://soocii-table/soocii_pepper/commented_status_table.tsv/'
-TBLPROPERTIES (
-  'transient_lastDdlTime'='1490352775');
-  
-MSCK REPAIR TABLE `soocii_pepper_commented_status`;
-```
+The Airflow scheduler is designed to run as a persistent service in an Airflow production environment. To kick it off, all you need to do is execute `airflow scheduler`. It will use the configuration specified in `airflow.cfg`.
 
-### liked status
-```
-CREATE EXTERNAL TABLE `soocii_pepper_liked_status`(
-  `status_liker` string,
-  `like_status_at` bigint,
-  `like_status_at_precise` string,
-  `status_id` string,
-  `status_creator` string)
-PARTITIONED BY (
-  `day` string)
-ROW FORMAT SERDE
-  'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe'
-WITH SERDEPROPERTIES (
-  'field.delim'='\t',
-  'line.delim'='\n',
-  'serialization.format'='\t')
-STORED AS INPUTFORMAT
-  'org.apache.hadoop.mapred.TextInputFormat'
-OUTPUTFORMAT
-  'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
-LOCATION
-  's3://soocii-table/soocii_pepper/liked_status_table.tsv/'
-TBLPROPERTIES (
-  'transient_lastDdlTime'='1490352775');
+## Writing a DAG definition file
 
-MSCK REPAIR TABLE `soocii_pepper_liked_status`;
-```
+This Airflow Python script is just a configuration file specifying the DAG’s structure as code. The actual tasks defined here will run in a different context from the context of this script. Different tasks run on different workers at different points in time, which means that this script cannot be used to cross communicate between tasks.
 
-### friendship
-```
-CREATE EXTERNAL TABLE `soocii_pepper_friendship`(
-  `fan` string,
-  `follow_at` bigint,
-  `follow_at_precise` string,
-  `celebrity` string)
-PARTITIONED BY (
-  `day` string)
-ROW FORMAT SERDE
-  'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe'
-WITH SERDEPROPERTIES (
-  'field.delim'='\t',
-  'line.delim'='\n',
-  'serialization.format'='\t')
-STORED AS INPUTFORMAT
-  'org.apache.hadoop.mapred.TextInputFormat'
-OUTPUTFORMAT
-  'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
-LOCATION
-  's3://soocii-table/soocii_pepper/friendship_table.tsv/'
-TBLPROPERTIES (
-  'transient_lastDdlTime'='1490352775');
+People sometimes think of the DAG definition file as a place where they can do some actual data processing - that is not the case at all! The script’s purpose is to define a DAG object. It needs to evaluate quickly (seconds, not minutes) since the scheduler will execute it periodically to reflect the changes if any.
 
-MSCK REPAIR TABLE `soocii_pepper_friendship`;
-```
+Let's write a workflow in the form of a DAG. We will have six task t1~t6. t2~t4 will depend on t1, t5 will depend on t2~t4 and t6 will depend on t5. Let's name the script demo.py and put it in dags folder of airflow home.
 
-### game achievements
-```
-CREATE EXTERNAL TABLE `soocii_pepper_played_gameapp`(
-  `player` string,
-  `play_duration` bigint,
-  `play_count` bigint,
-  `play_at` bigint,
-  `gameapp_pkg_name` string)
-PARTITIONED BY (
-  `day` string)
-ROW FORMAT SERDE
-  'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe'
-WITH SERDEPROPERTIES (
-  'field.delim'='\t',
-  'line.delim'='\n',
-  'serialization.format'='\t')
-STORED AS INPUTFORMAT
-  'org.apache.hadoop.mapred.TextInputFormat'
-OUTPUTFORMAT
-  'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
-LOCATION
-  's3://soocii-table/soocii_pepper/played_gameapp_table.tsv/'
-TBLPROPERTIES (
-  'transient_lastDdlTime'='1490352775');
+## Testing a DAG definition file
 
-MSCK REPAIR TABLE `soocii_pepper_played_gameapp`;
-```
+Time to run some tests. First let’s make sure that the pipeline parses. Let’s assume we’re saving the code from the previous step in demo.py in the DAGs folder referenced in your airflow.cfg.
 
-### reload table
-```
-MSCK REPAIR TABLE <tablename>;
-```
-## Detailed Processing Flow
+`python dags/demo.py`
 
-* start up titan service in backgroud.
-* export all of accounts from graph DB.
-* replace `_LIST_ACCOUNT_ID_`and `_QUERY_SINCE_` in all groovy script files.
-* execute each groovy script file except list_account_id.groovy and list_status_id.groovy.
-* remove last line of returned map from groovy script file.
-* convert map to tab separated file.
-* copy outfiles to S3.
+If the script does not raise an exception it means that you haven’t done anything horribly wrong, and that your Airflow environment is somewhat sound.
 
-Please be noted, you have to retain the order of exported data even you'd like to export more information. Otherwise you have to clean up and export previous dates again.
+## Enabling a DAG definition file
+
+Open any browser and visit default web server at http://localhost:8080, you should see the DAG `demo` is disabled.
+
+![](https://raw.githubusercontent.com/jonascheng/AirflowDemo/master/screenshots/demo_dag_disabled.png)
+
+Once you enable the DAG `demo`, all scheduled tasks will be catched up by default from 2017-03-01 on.
+
+![](https://raw.githubusercontent.com/jonascheng/AirflowDemo/master/screenshots/demo_dag_enabled.png)
+
+## Reference
+
+* [Airflow Official Docs](https://airflow.incubator.apache.org/index.html)
+* [Airflow - Beginners Tutorial](http://tech.lalitbhatt.net/2016/04/airflow-beginners-tutorial.html)
+
